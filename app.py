@@ -1,10 +1,10 @@
 import os
 import waitress
+import subprocess
 
 from flask import Flask, jsonify
 from flask_restx import Resource, Api
 from flask.logging import create_logger
-from subprocess import call
 
 
 # instantiate the app
