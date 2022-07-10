@@ -36,8 +36,9 @@ if "DEV_MODE" in os.environ:
 @app.route("/version")
 def version_endpoint():
     result = subprocess.run(['allure', '--version'], stdout=subprocess.PIPE)
+    version = result.stdout.decode("utf-8").strip()
     body = {
-        "message": result
+        "version": version
     }
     resp = jsonify(body)
     resp.status_code = 200
