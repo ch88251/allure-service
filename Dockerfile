@@ -35,7 +35,7 @@ WORKDIR /home/allure
 ENV PATH=$PATH:/allure-${ALLURE_VERSION}/bin
 ENV RESULTS_DIRECTORY=/home/allure/allure-results
 ENV REPORT_DIRECTORY=/home/allure/allure-report
-ENV PROJECTS_DIR=/home/allure/projects
+ENV PROJECTS_DIRECTORY=/home/allure/projects
 ENV DEFAULT_PROJECT=default
 ENV DEFAULT_PROJECT_ROOT=$PROJECTS_DIR/$DEFAULT_PROJECT
 ENV DEFAULT_PROJECT_RESULTS=$DEFAULT_PROJECT_ROOT/results
@@ -48,10 +48,10 @@ RUN mkdir /home/allure/allure-results
 RUN mkdir /home/allure/allure-report
 RUN chown -R allure:allure /home/allure
 
-ENV PORT=5050
+ENV PORT=5000
 
 HEALTHCHECK --interval=10s --timeout=60s --retries=3 \
     CMD curl -f http://localhost:$PORT || exit 1
 
 USER allure
-CMD scripts/runAllureApp.sh & scripts/checkAllureResultsFiles.sh
+CMD python /home/allure/scripts/runAllureApp.sh

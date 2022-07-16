@@ -1,55 +1,80 @@
 import os
-import waitress
-import subprocess
+import re
 
-from flask import Flask, jsonify
-from flask_restx import Resource, Api
-from flask.logging import create_logger
+from flask import Flask, request, jsonify
 
-
-# instantiate the app
 app = Flask(__name__)
 
-api = Api(app)
+PROJECTS_DIRECTORY = os.environ['PROJECTS_DIRECTORY']
 
-LOGGER = create_logger(app)
 
-DEV_MODE = 0
-HOST = '0.0.0.0'
-PORT = os.environ['PORT']
-THREADS = 8
-URL_SCHEME = 'http'
-URL_PREFIX = ''
-
-if "DEV_MODE" in os.environ:
+@app.route('/api/projects', methods=['POST'])
+def create_project_endpoint():
     try:
-        DEV_MODE_TMP = int(os.environ['DEV_MODE'])
-        if DEV_MODE_TMP in (1, 0):
-            DEV_MODE = DEV_MODE_TMP
-            LOGGER.info('Overriding DEV_MODE=%s', DEV_MODE)
-        else:
-            LOGGER.error('Wrong env var value. Setting DEV_MODE=0 by default')
+        if not request.is_json:
+            raise Exception("Header 'Content-Type' is not 'application/json'")
+
+        project_id = create_project(request.get_json())
     except Exception as ex:
-        LOGGER.error('Wrong env var value. Setting DEV_MODE=0 by default')
+        body = {
+            'message': str(ex)
+        }
+        response = jsonify(body)
+        response.status_code = 400
+    else:
+        body = {
+            'message': f'Successfully created project with id {project_id}'
+        }
+        response = jsonify(body)
+        response.status_code = 201
+
+    return response
 
 
-@app.route("/version")
-def version_endpoint():
-    result = subprocess.run(['allure', '--version'], stdout=subprocess.PIPE)
-    version = result.stdout.decode("utf-8").strip()
-    body = {
-        "version": version
-    }
-    resp = jsonify(body)
-    resp.status_code = 200
-    return resp
+def create_project(json_body):
+    if 'id' not in json_body:
+        raise Exception('The body should contain an id attribute')
+    if isinstance(json_body['id'], str) is False:
+        raise Exception('The id should be a string')
+    if not json_body['id'].strip():
+        raise Exception('The id should not be empty.')
+    if len(json_body['id']) > 50:
+        raise Exception('The project id cannot be longer than 50 characters.')
+
+    project_id_pattern = re.compile('^[a-z\\d]([a-z\\d -]*[a-z\\d])?$')
+    match = project_id_pattern.match(json_body['id'])
+
+    if match is None:
+        raise Exception('The project id can only contain alpha-numeric characters and dashes.')
+
+    project_id = json_body['id']
+
+    # Check to see if the project id already exists
+    if project_exists(project_id) is True:
+        raise Exception(f"A project with id {project_id} already exists.")
+
+    project_path = get_project_path(project_id)
+    latest_report_dir = f'{project_path}/reports/latest'
+    results_dir = f'{project_path}/results'
+
+    if not os.path.exists(latest_report_dir):
+        os.makedirs(latest_report_dir)
+
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+
+    return project_id
+
+
+def project_exists(project_id):
+    if not project_id.strip():
+        return False
+    return os.path.isdir(get_project_path(project_id))
+
+
+def get_project_path(project_id):
+    return f'{PROJECTS_DIRECTORY}/{project_id}'
 
 
 if __name__ == '__main__':
-    if DEV_MODE == 1:
-        LOGGER.info('Starting in DEV_MODE')
-        app.run(host=HOST, port=int(PORT))
-    else:
-        waitress.serve(app, threads=THREADS, host=HOST, port=PORT,
-                       url_scheme=URL_SCHEME, url_prefix=URL_PREFIX)
-
+    app.run()
