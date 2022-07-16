@@ -1,2 +1,2 @@
 #!/bin/bash
-python /home/allure/app.py
+python3 /home/allure/app.py
