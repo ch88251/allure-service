@@ -50,9 +50,6 @@ RUN chown -R allure:allure /home/allure
 
 ENV PORT=5000
 
-HEALTHCHECK --interval=10s --timeout=60s --retries=3 \
-    CMD curl -f http://localhost:$PORT || exit 1
-
 USER allure
 
 CMD ["python", "/home/allure/app.py"]

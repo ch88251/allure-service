@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 
 from flask import Flask, request, jsonify
 
@@ -27,6 +28,34 @@ def create_project_endpoint():
         }
         response = jsonify(body)
         response.status_code = 201
+
+    return response
+
+
+@app.route('/api/projects/<project_id>', methods=['DELETE'])
+def delete_project_endpoint(project_id):
+    try:
+        if project_exists(project_id) is False:
+            body = {
+                'message': f"No project found with id {project_id}"
+            }
+            resp = jsonify(body)
+            resp.status_code = 404
+            return resp
+        project_path = get_project_path(project_id)
+        shutil.rmtree(project_path)
+    except Exception as ex:
+        body = {
+            'message': str(ex)
+        }
+        response = jsonify(body)
+        response.status_code = 400
+    else:
+        body = {
+            'message': f'Successfully deleted project with id {project_id}'
+        }
+        response = jsonify(body)
+        response.status_code = 200
 
     return response
 
