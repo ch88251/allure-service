@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import shutil
@@ -7,6 +8,7 @@ from flask import Flask, request, jsonify, url_for
 app = Flask(__name__)
 
 PROJECTS_DIRECTORY = os.environ['PROJECTS_DIRECTORY']
+API_RESPONSE_LESS_VERBOSE = 0
 
 
 @app.route('/api/projects', methods=['POST'])
@@ -127,6 +129,95 @@ def delete_project_endpoint(project_id):
     return response
 
 
+@app.route("/api/send-results", methods=['POST'])
+def send_results_endpoint():
+    try:
+        content_type = str(request.content_type)
+        if content_type is None:
+            raise Exception("The request must have a 'Content-Type' of "
+                            "'application/json' or 'multipart/form-data'.")
+        if (content_type.startswith('application/json')
+            or content_type.startswith('multipart/form-data')) is False:
+            raise Exception("The request must have a 'Content-Type' of "
+                            "'application/json' or 'multipart/form-data'.")
+
+        project_id = resolve_project(request.args.get('project-id'))
+        if project_exists(project_id) is False:
+            body = {
+                'meta_data': {
+                    'message': f"No project found for project ID {project_id}."
+                }
+            }
+            resp = jsonify(body)
+            resp.status_code = 404
+            return resp
+
+        validated_results = []
+        processed_files = []
+        failed_files = []
+        files = []
+        current_files_count = 0
+        processed_files_count = 0
+        sent_files_count = 0
+        results_project = '{}/results'.format(get_project_path(project_id))
+
+        if content_type.startswith('application/json') is True:
+            json_body = request.get_json()
+
+            if 'results' not in json_body:
+                raise Exception("'results' array is required in the body")
+
+            validated_results = validate_json_results(json_body['results'])
+            send_json_results(results_project, validated_results, processed_files, failed_files)
+
+        if content_type.startswith('multipart/form-data') is True:
+            validated_results = validate_files_array(request.files.getlist('files[]'))
+            send_files_results(results_project, validated_results, processed_files, failed_files)
+
+        failed_files_count = len(failed_files)
+        if failed_files_count > 0:
+            raise Exception('Problems with files: {}'.format(failed_files))
+
+        if API_RESPONSE_LESS_VERBOSE != 1:
+            files = os.listdir(results_project)
+            current_files_count = len(files)
+            sent_files_count = len(validated_results)
+            processed_files_count = len(processed_files)
+    except Exception as ex:
+        body = {
+            'meta_data': {
+                'message': str(ex)
+            }
+        }
+        resp = jsonify(body)
+        resp.status_code = 400
+    else:
+        if API_RESPONSE_LESS_VERBOSE != 1:
+            body = {
+                'data': {
+                    'current_files': files,
+                    'current_files_count': current_files_count,
+                    'failed_files': failed_files,
+                    'failed_files_count': failed_files_count,
+                    'processed_files': processed_files,
+                    'processed_files_count': processed_files_count,
+                    'sent_files_count': sent_files_count
+                },
+                'meta_data': {
+                    'message': "Results successfully sent for project_id '{}'".format(project_id)
+                }
+            }
+        else:
+            body = {
+                'meta_data': {
+                    'message': "Results successfully sent for project_id '{}'".format(project_id)
+                }
+            }
+
+        resp = jsonify(body)
+        resp.status_code = 200
+
+
 def create_project(json_body):
     if 'id' not in json_body:
         raise Exception('The body should contain an id attribute')
@@ -172,5 +263,91 @@ def get_project_path(project_id):
     return f'{PROJECTS_DIRECTORY}/{project_id}'
 
 
+def resolve_project(project_id_param):
+    project_id = None
+    if project_id_param is not None:
+        project_id = project_id_param
+    return project_id
+
+
+def validate_json_results(results):
+    if isinstance(results, list) is False:
+        raise Exception("'results' should be an array")
+
+    if not results:
+        raise Exception("'results' array is empty")
+
+    map_results = {}
+    for result in results:
+        if 'file_name' not in result or not result['file_name'].strip():
+            raise Exception("'file_name' attribute is required for all results")
+        file_name = result.get('file_name')
+        map_results[file_name] = ''
+
+    if len(results) != len(map_results):
+        raise Exception("Duplicated file names in 'results'")
+
+    validated_results = []
+    for result in results:
+        file_name = result.get('file_name')
+        validated_result = {'file_name': file_name}
+
+        if 'content_base64' not in result or not result['content_base64'].strip():
+            raise Exception("'content_base64' attribute is required for '{}' file"
+                            .format(file_name))
+
+        content_base64 = result.get('content_base64')
+        try:
+            validated_result['content_base64'] = base64.b64decode(content_base64)
+        except Exception as ex:
+            raise Exception(
+                "'content_base64' attribute content for '{}' file should be encoded to base64"
+                .format(file_name), ex)
+        validated_results.append(validated_result)
+
+    return validated_results
+
+
+def send_json_results(results_project, validated_results, processed_files, failed_files):
+    for result in validated_results:
+        file_name = result.get('file_name')
+        content_base64 = result.get('content_base64')
+        file = None
+        try:
+            file = open("%s/%s" % (results_project, file_name), "wb")
+            file.write(content_base64)
+        except Exception as ex:
+            error = {}
+            error['message'] = str(ex)
+            error['file_name'] = file_name
+            failed_files.append(error)
+        else:
+            processed_files.append(file_name)
+        finally:
+            if file is not None:
+                file.close()
+
+
+def validate_files_array(files):
+    if not files:
+        raise Exception("'files[]' array is empty")
+    return files
+
+
+def send_files_results(results_project, validated_results, processed_files, failed_files):
+    for file in validated_results:
+        file_name = None
+        try:
+            file_name = file.filename
+            file.save("{}/{}".format(results_project, file_name))
+        except Exception as ex:
+            error = {}
+            error['message'] = str(ex)
+            error['file_name'] = file_name
+            failed_files.append(error)
+        else:
+            processed_files.append(file_name)
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0')
+    app.run(host='0.0.0.0', port=5001)
